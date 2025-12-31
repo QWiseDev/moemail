@@ -308,7 +308,7 @@ const pushPagesSecret = () => {
         return false;
       })
       .join('\n');
-
+     console.log(runtimeEnvContent);
     // 写入临时文件
     writeFileSync(runtimeEnvFile, runtimeEnvContent);
 
