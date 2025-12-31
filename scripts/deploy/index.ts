@@ -289,7 +289,9 @@ const pushPagesSecret = () => {
     // 创建一个临时文件，只包含运行时所需的环境变量
     const envContent = readFileSync(resolve('.env'), 'utf-8');
     const runtimeEnvFile = resolve('.env.runtime');
-
+    console.log(123);
+    console.log(envContent);
+    console.log(runtimeEnvFile);
     // 从.env文件中提取运行时变量
     const runtimeEnvContent = envContent
       .split('\n')
