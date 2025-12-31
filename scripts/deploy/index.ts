@@ -289,30 +289,35 @@ const pushPagesSecret = () => {
     // 创建一个临时文件，只包含运行时所需的环境变量
     const envContent = readFileSync(resolve('.env'), 'utf-8');
     const runtimeEnvFile = resolve('.env.runtime');
-    console.log(123);
-    console.log(envContent);
-    console.log(runtimeEnvFile);
-    // 从.env文件中提取运行时变量
-    const runtimeEnvContent = envContent
-      .split('\n')
-      .filter(line => {
-        const trimmedLine = line.trim();
-        // 跳过注释和空行
-        if (!trimmedLine || trimmedLine.startsWith('#')) return false;
 
-        // 检查是否为运行时所需的环境变量
-        for (const varName of runtimeEnvVars) {
-          if (line.startsWith(`${varName} =`) || line.startsWith(`${varName}=`)) {
-            const value = line.substring(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '');
-            return value.length > 0;
+    // 从.env文件中提取运行时变量并构建JSON对象
+    const secretsObj: Record<string, string> = {};
+    
+    envContent.split('\n').forEach(line => {
+      const trimmedLine = line.trim();
+      // 跳过注释和空行
+      if (!trimmedLine || trimmedLine.startsWith('#')) return;
+
+      // 检查是否为运行时所需的环境变量
+      for (const varName of runtimeEnvVars) {
+        if (line.startsWith(`${varName} =`) || line.startsWith(`${varName}=`)) {
+          const value = line.substring(line.indexOf('=') + 1).trim().replace(/^["']|["']$/g, '');
+          if (value.length > 0) {
+            secretsObj[varName] = value;
           }
+          break;
         }
-        return false;
-      })
-      .join('\n');
-     console.log(runtimeEnvContent);
-    // 写入临时文件
-    writeFileSync(runtimeEnvFile, runtimeEnvContent);
+      }
+    });
+
+    // 如果没有有效的secrets，跳过推送
+    if (Object.keys(secretsObj).length === 0) {
+      console.log("⚠️ No valid secrets found to push, skipping...");
+      return;
+    }
+
+    // 写入JSON格式的临时文件（wrangler pages secret bulk 需要JSON格式）
+    writeFileSync(runtimeEnvFile, JSON.stringify(secretsObj, null, 2));
 
     // 使用临时文件推送secrets
     execSync(`pnpm dlx wrangler pages secret bulk ${runtimeEnvFile}`, { stdio: "inherit" });
