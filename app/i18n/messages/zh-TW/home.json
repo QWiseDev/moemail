@@ -1,6 +1,6 @@
 {
-  "title": "MoeMail",
-  "subtitle": "萌萌噠臨時郵箱服務",
+  "title": "KLMail",
+  "subtitle": "卡拉米郵箱服務",
   "features": {
     "privacy": {
       "title": "隱私保護",
@@ -24,4 +24,3 @@
     "getStarted": "開始使用"
   }
 }
-
