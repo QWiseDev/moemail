@@ -2,7 +2,7 @@ import { createDb } from "@/lib/db"
 import { accounts, emails, messages, users } from "@/lib/schema"
 import { PERMISSIONS } from "@/lib/permissions"
 import { checkPermission } from "@/lib/auth"
-import { eq, inArray, or } from "drizzle-orm"
+import { eq, inArray, or, sql } from "drizzle-orm"
 
 export const runtime = "edge"
 
@@ -42,24 +42,120 @@ async function findUserBySearch(db: Db, searchText: string) {
 
 const toTimestamp = (date?: Date | null) => date?.getTime() ?? null
 
+async function requirePromotePermission() {
+  const canPromote = await checkPermission(PERMISSIONS.PROMOTE_USER)
+
+  if (!canPromote) {
+    return Response.json({ error: "权限不足" }, { status: 403 })
+  }
+
+  return null
+}
+
+export async function GET() {
+  try {
+    const permissionError = await requirePromotePermission()
+    if (permissionError) return permissionError
+
+    const db = createDb()
+    const [userList, accountList, emailCounts, messageCounts] = await Promise.all([
+      db.query.users.findMany({
+        orderBy: (users, { asc }) => [
+          asc(users.username),
+          asc(users.email),
+          asc(users.id)
+        ],
+        with: {
+          userRoles: {
+            with: {
+              role: true
+            }
+          }
+        }
+      }),
+      db.query.accounts.findMany(),
+      db.select({
+        userId: emails.userId,
+        count: sql<number>`count(*)`
+      }).from(emails).groupBy(emails.userId),
+      db.select({
+        userId: emails.userId,
+        count: sql<number>`count(${messages.id})`
+      }).from(emails)
+        .leftJoin(messages, eq(messages.emailId, emails.id))
+        .groupBy(emails.userId)
+    ])
+
+    const providersByUser = new Map<string, string[]>()
+    accountList.forEach((account) => {
+      const providers = providersByUser.get(account.userId) ?? []
+      providers.push(account.provider)
+      providersByUser.set(account.userId, providers)
+    })
+
+    const emailCountByUser = new Map(
+      emailCounts
+        .filter((item) => item.userId)
+        .map((item) => [item.userId!, Number(item.count)])
+    )
+    const messageCountByUser = new Map(
+      messageCounts
+        .filter((item) => item.userId)
+        .map((item) => [item.userId!, Number(item.count)])
+    )
+
+    return Response.json({
+      users: userList.map(user => ({
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        emailVerified: toTimestamp(user.emailVerified),
+        image: user.image,
+        role: user.userRoles[0]?.role.name,
+        roles: user.userRoles.map(userRole => userRole.role.name),
+        providers: providersByUser.get(user.id) ?? [],
+        emailCount: emailCountByUser.get(user.id) ?? 0,
+        messageCount: messageCountByUser.get(user.id) ?? 0
+      }))
+    })
+  } catch (error) {
+    console.error("Failed to list users:", error)
+    return Response.json(
+      { error: "查询用户列表失败" },
+      { status: 500 }
+    )
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const json = await request.json()
-    const { searchText: rawSearchText } = json as { searchText: string }
+    const { searchText: rawSearchText, userId } = json as { searchText?: string; userId?: string }
     const searchText = rawSearchText?.trim()
+    const targetUserId = userId?.trim()
 
-    if (!searchText) {
+    if (!searchText && !targetUserId) {
       return Response.json({ error: "请提供用户名或邮箱地址" }, { status: 400 })
     }
 
-    const canPromote = await checkPermission(PERMISSIONS.PROMOTE_USER)
-    if (!canPromote) {
-      return Response.json({ error: "权限不足" }, { status: 403 })
-    }
+    const permissionError = await requirePromotePermission()
+    if (permissionError) return permissionError
 
     const db = createDb()
 
-    const user = await findUserBySearch(db, searchText)
+    const user = targetUserId
+      ? await db.query.users.findFirst({
+          where: eq(users.id, targetUserId),
+          with: {
+            userRoles: {
+              with: {
+                role: true
+              }
+            }
+          }
+        })
+      : await findUserBySearch(db, searchText!)
 
     if (!user) {
       return Response.json({ error: "未找到用户" }, { status: 404 })
