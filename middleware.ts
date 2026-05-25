@@ -14,12 +14,20 @@ const API_PERMISSIONS: Record<string, Permission> = {
   '/api/api-keys': PERMISSIONS.MANAGE_API_KEY,
 }
 
+const PUBLIC_API_PATH_PREFIXES = ['/api/auth', '/api/shared']
+
+function isPublicApiPath(pathname: string) {
+  return PUBLIC_API_PATH_PREFIXES.some(
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+  )
+}
+
 export async function middleware(request: Request) {
   const url = new URL(request.url)
   const pathname = url.pathname
 
   if (pathname.startsWith('/api')) {
-    if (pathname.startsWith('/api/auth')) {
+    if (isPublicApiPath(pathname)) {
       return NextResponse.next()
     }
 
