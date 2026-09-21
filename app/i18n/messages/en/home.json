@@ -1,6 +1,6 @@
 {
-  "title": "MoeMail",
-  "subtitle": "Cute Temporary Email Service",
+  "title": "KLMail",
+  "subtitle": "Kalami Mail Service",
   "features": {
     "privacy": {
       "title": "Privacy Protection",
@@ -24,4 +24,3 @@
     "getStarted": "Get Started"
   }
 }
-
