@@ -8,6 +8,7 @@ import { ShareDialog } from "./share-dialog"
 import { Mail, RefreshCw, Trash2 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { useThrottle } from "@/hooks/use-throttle"
 import { EMAIL_CONFIG } from "@/config"
 import { useToast } from "@/components/ui/use-toast"
@@ -56,6 +57,8 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
   const [loadingMore, setLoadingMore] = useState(false)
   const [total, setTotal] = useState(0)
   const [emailToDelete, setEmailToDelete] = useState<Email | null>(null)
+  const [batchDeleteOpen, setBatchDeleteOpen] = useState(false)
+  const [selectedEmailIds, setSelectedEmailIds] = useState<string[]>([])
   const { toast } = useToast()
 
   const fetchEmails = async (cursor?: string) => {
@@ -120,6 +123,24 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
     if (session) fetchEmails()
   }, [session])
 
+  useEffect(() => {
+    setSelectedEmailIds(prev => prev.filter(id => emails.some(email => email.id === id)))
+  }, [emails])
+
+  const toggleEmailSelection = (emailId: string) => {
+    setSelectedEmailIds(prev => (
+      prev.includes(emailId)
+        ? prev.filter(id => id !== emailId)
+        : [...prev, emailId]
+    ))
+  }
+
+  const handleToggleSelectAll = () => {
+    setSelectedEmailIds(prev => (
+      prev.length === emails.length ? [] : emails.map(email => email.id)
+    ))
+  }
+
   const handleDelete = async (email: Email) => {
     try {
       const response = await fetch(`/api/emails/${email.id}`, {
@@ -138,6 +159,7 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
 
       setEmails(prev => prev.filter(e => e.id !== email.id))
       setTotal(prev => prev - 1)
+      setSelectedEmailIds(prev => prev.filter(id => id !== email.id))
 
       toast({
         title: t("success"),
@@ -158,7 +180,62 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
     }
   }
 
+  const handleBatchDelete = async () => {
+    const deleteIds = [...selectedEmailIds]
+    if (deleteIds.length === 0) {
+      setBatchDeleteOpen(false)
+      return
+    }
+
+    try {
+      const response = await fetch("/api/emails/batch", {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({ ids: deleteIds })
+      })
+
+      const data = await response.json() as { error?: string; deletedCount?: number }
+      if (!response.ok) {
+        toast({
+          title: t("error"),
+          description: data.error || t("batchDeleteFailed"),
+          variant: "destructive"
+        })
+        return
+      }
+
+      const deletedCount = typeof data.deletedCount === "number" ? data.deletedCount : deleteIds.length
+      const deletedIdSet = new Set(deleteIds)
+
+      setEmails(prev => prev.filter(email => !deletedIdSet.has(email.id)))
+      setSelectedEmailIds(prev => prev.filter(id => !deletedIdSet.has(id)))
+      setTotal(prev => Math.max(0, prev - deletedCount))
+
+      toast({
+        title: t("success"),
+        description: t("batchDeleteSuccess", { count: deletedCount })
+      })
+
+      if (selectedEmailId && deletedIdSet.has(selectedEmailId)) {
+        onEmailSelect(null)
+      }
+    } catch {
+      toast({
+        title: t("error"),
+        description: t("batchDeleteFailed"),
+        variant: "destructive"
+      })
+    } finally {
+      setBatchDeleteOpen(false)
+    }
+  }
+
   if (!session) return null
+
+  const hasSelectedEmails = selectedEmailIds.length > 0
+  const allEmailsSelected = emails.length > 0 && selectedEmailIds.length === emails.length
 
   return (
     <>
@@ -181,8 +258,33 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
                 t("emailCount", { count: total, max: config?.maxEmails || EMAIL_CONFIG.MAX_ACTIVE_EMAILS })
               )}
             </span>
+            {hasSelectedEmails && (
+              <span className="text-xs text-primary">
+                {t("selectedCount", { count: selectedEmailIds.length })}
+              </span>
+            )}
           </div>
-          <CreateDialog onEmailCreated={handleRefresh} />
+          <div className="flex items-center gap-2">
+            {emails.length > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleToggleSelectAll}
+              >
+                {allEmailsSelected ? t("clearSelection") : t("selectAll")}
+              </Button>
+            )}
+            {hasSelectedEmails && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setBatchDeleteOpen(true)}
+              >
+                {t("batchDelete")}
+              </Button>
+            )}
+            <CreateDialog onEmailCreated={handleRefresh} />
+          </div>
         </div>
         
         <div className="flex-1 overflow-auto p-2" onScroll={handleScroll}>
@@ -199,6 +301,12 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
                   )}
                   onClick={() => onEmailSelect(email)}
                 >
+                  <div className="shrink-0" onClick={(e) => e.stopPropagation()}>
+                    <Checkbox
+                      checked={selectedEmailIds.includes(email.id)}
+                      onChange={() => toggleEmailSelection(email.id)}
+                    />
+                  </div>
                   <Mail className="h-4 w-4 text-primary/60" />
                   <div className="truncate flex-1">
                     <div className="font-medium truncate">{email.address}</div>
@@ -259,6 +367,26 @@ export function EmailList({ onEmailSelect, selectedEmailId }: EmailListProps) {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <AlertDialog open={batchDeleteOpen} onOpenChange={setBatchDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("batchDeleteConfirm")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("batchDeleteDescription", { count: selectedEmailIds.length })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{tCommon("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive hover:bg-destructive/90"
+              onClick={handleBatchDelete}
+            >
+              {tCommon("delete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   )
-} 
+}
